@@ -27,6 +27,8 @@ export interface BattlePass {
 }
 
 export interface PlayerProfile {
+  // Optional for profiles saved before the guided first mission was introduced.
+  firstMission?: { taps: number; claimed: boolean };
   id: string;
   name: string;
   commanderSex: 'male' | 'female';
@@ -221,3 +223,4 @@ export interface SelectableAvatar {
   sex: 'male' | 'female';
   hint: string;
 }
+

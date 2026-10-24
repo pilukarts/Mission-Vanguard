@@ -13,6 +13,7 @@ import images from "@/lib/images";
 import { cn } from "@/lib/utils";
 import { POINTS_PER_TAP } from "@/lib/gameData";
 import { assetPath } from "@/lib/assetPath";
+import { FIRST_MISSION_TARGET, FIRST_MISSION_REWARD } from "@/lib/firstMission";
 
 const ARK_SHIP_IMAGE = assetPath("/images/global/ark-carrier-complete.png");
 const ARK_SECTION_BUILD_MS = 60 * 24 * 60 * 60 * 1000;
@@ -51,7 +52,7 @@ function HoloAction({ href, label, icon: Icon, tone = "cyan", onClick }: ActionP
 }
 
 export default function HomePage() {
-  const { playerProfile, isLoading, isInitialSetupDone, handleTap, getUpgradeLevel, toggleCommander, toggleMusic, isMusicPlaying } = useGame();
+  const { playerProfile, isLoading, isInitialSetupDone, handleTap, getUpgradeLevel, toggleCommander, toggleMusic, isMusicPlaying, claimFirstMissionReward } = useGame();
   const { toast } = useToast();
   const [isIntroPlaying, setIsIntroPlaying] = useState(() => !hasPlayedCinematicIntro);
   const [tapBurst, setTapBurst] = useState(0);
@@ -106,6 +107,9 @@ export default function HomePage() {
   if (isLoading || isIntroPlaying) return <IntroScreen />;
   if (!isInitialSetupDone || !playerProfile) return <PlayerSetup />;
 
+  const firstMissionTaps = playerProfile.firstMission?.taps ?? 0;
+  const firstMissionReady = firstMissionTaps >= FIRST_MISSION_TARGET;
+
   const tapCommander = () => {
     if (playerProfile.currentTaps <= 0 && Date.now() < playerProfile.tapsAvailableAt) {
       const seconds = Math.max(1, Math.ceil((playerProfile.tapsAvailableAt - Date.now()) / 1000));
@@ -148,6 +152,20 @@ export default function HomePage() {
         <div className="hidden items-center gap-2 rounded-full border border-emerald-300/30 bg-emerald-950/35 px-3 py-2 text-xs text-emerald-200 sm:flex"><Radio className="h-4 w-4 animate-pulse" /> SYSTEMS ONLINE</div>
       </div>
     </header>
+
+    {!playerProfile.firstMission?.claimed && (
+      <section aria-label="First mission" className="relative z-30 mx-4 mb-14 rounded-xl border border-cyan-300/50 bg-slate-950/90 p-4 sm:mx-7">
+        <h1 className="text-lg font-bold text-cyan-200">Your first mission</h1>
+        <p className="mt-1 text-sm text-slate-200">Tap your commander {FIRST_MISSION_TARGET} times to collect materials, then claim {FIRST_MISSION_REWARD} bonus points. No purchase needed.</p>
+        <p role="status" className="mt-2 font-bold text-amber-200">{Math.min(firstMissionTaps, FIRST_MISSION_TARGET)} / {FIRST_MISSION_TARGET} commander taps</p>
+        <progress aria-label="First mission progress" value={firstMissionTaps} max={FIRST_MISSION_TARGET} className="mt-2 h-3 w-full accent-cyan-300" />
+        {firstMissionReady ? (
+          <button type="button" onClick={claimFirstMissionReward} className="mt-3 rounded-lg bg-cyan-300 px-4 py-3 font-bold text-slate-950">Claim {FIRST_MISSION_REWARD} points</button>
+        ) : (
+          <p className="mt-2 text-sm text-cyan-100">Tap the character below to begin. Tapping the ship does not count towards this mission.</p>
+        )}
+      </section>
+    )}
 
     <div className="relative z-20 grid min-h-[620px] grid-cols-1 items-center gap-8 px-4 pb-48 pt-2 lg:grid-cols-[minmax(210px,1fr)_minmax(320px,1.35fr)_minmax(300px,1.35fr)] lg:gap-5 lg:px-8 lg:pb-32">
       <nav className="order-3 grid grid-cols-2 gap-3 lg:order-1 lg:grid-cols-1">
@@ -215,3 +233,4 @@ export default function HomePage() {
     </div>
   </section>;
 }
+
