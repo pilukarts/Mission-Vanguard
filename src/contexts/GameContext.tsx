@@ -7,6 +7,7 @@ import { SEASONS_DATA, UPGRADES_DATA, ARK_UPGRADES_DATA, MARKETPLACE_ITEMS_DATA,
 import { useToast } from '@/hooks/use-toast';
 import { syncPlayerProfileInFirestore } from '@/lib/firestore';
 import { assetPath } from '@/lib/assetPath';
+import { advanceFirstMission, claimFirstMission } from '@/lib/firstMission';
 
 interface CoreAskInput {
   question: string;
@@ -72,6 +73,7 @@ export interface GameContextType {
   marketplaceItems: MarketplaceItem[];
   purchaseMarketplaceItem: (itemId: string) => void;
   claimQuestReward: (questId: string) => void;
+  claimFirstMissionReward: () => void;
   refreshDailyQuestsIfNeeded: () => void;
   refillTaps: () => void;
   battlePassData: BattlePass;
@@ -170,8 +172,21 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         console.error("Could not access localStorage. Starting fresh.", e);
     }
 
+    let parsedProfile: PlayerProfile | null = null;
     if (savedProfile) {
-        let parsedProfile = JSON.parse(savedProfile) as PlayerProfile;
+      try {
+        parsedProfile = JSON.parse(savedProfile) as PlayerProfile;
+        if (!parsedProfile || typeof parsedProfile !== 'object' || !parsedProfile.id ||
+            !Number.isFinite(parsedProfile.points) || !Number.isFinite(parsedProfile.level)) {
+          throw new Error('Invalid saved profile');
+        }
+      } catch (error) {
+        console.error('Could not restore saved progress:', error);
+        toast({ title: 'Could not restore progress', description: 'Your saved data could not be read. Please contact support before creating a new profile.', variant: 'destructive' });
+        parsedProfile = null;
+      }
+    }
+    if (parsedProfile) {
 
         const now = Date.now();
         const lastLogin = parsedProfile.lastLoginTimestamp ?? now;
@@ -195,6 +210,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
         setPlayerProfile(hydratedProfile);
         const season = SEASONS_DATA.find(s => s.id === hydratedProfile.currentSeasonId) || SEASONS_DATA[0];
+        setCurrentSeason(season);
         setIsCoreUnlocked(!!hydratedProfile.upgrades['coreUnlocked'] || SEASONS_DATA.slice(0, SEASONS_DATA.indexOf(season)).some(s => s.unlocksCore));
 
         if (offlineEarnings > 0) {
@@ -491,6 +507,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         addCoreMessage({ type: 'system_alert', content: `Promotion! You've reached the ${newLeague} league.` });
       }
 
+      if (!isLogoTap) updatedProfile = advanceFirstMission(updatedProfile);
       let profileWithQuestProgress = updateQuestProgress(updatedProfile, 'taps', 1);
       profileWithQuestProgress = updateQuestProgress(profileWithQuestProgress, 'points_earned', finalAmount);
 
@@ -501,6 +518,10 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setTimeout(() => setComboCount(0), 3000);
   }, [pointsPerTapValue, criticalTapChance, criticalTapMultiplier, comboMultiplierValue, addCoreMessage, updateQuestProgress, toast, currentSeason.id]);
 
+
+  const claimFirstMissionReward = useCallback(() => {
+    setPlayerProfile(prev => prev ? claimFirstMission(prev) : null);
+  }, []);
 
   const claimQuestReward = useCallback((questId: string) => {
     setPlayerProfile(prev => {
@@ -736,21 +757,27 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (playerProfile && isInitialSetupDone) {
       const profileToSave = {
         ...playerProfile,
+        lastLoginTimestamp: Date.now(),
         activeDailyQuests: playerProfile.activeDailyQuests.map(({ icon, ...rest }) => rest),
       };
-      syncPlayerProfileInFirestore(profileToSave).catch(error => {
-        console.error("Firestore sync failed:", error);
-        toast({
-            title: "Sync Error",
-            description: "Failed to save progress to the cloud. Progress is saved locally.",
-            variant: "destructive"
-        });
-      });
+      let savedLocally = false;
       try {
         localStorage.setItem('playerProfile', JSON.stringify(profileToSave));
-      } catch (e) {
-          console.error("Failed to save player profile to localStorage:", e);
+        savedLocally = true;
+      } catch (error) {
+        console.error('Failed to save player profile locally:', error);
+        toast({ title: 'Local save unavailable', description: 'Keep the game open. Progress may not survive reopening on this device.', variant: 'destructive' });
       }
+      syncPlayerProfileInFirestore(profileToSave).catch(error => {
+        console.error('Firestore sync failed:', error);
+        toast({
+          title: 'Sync Error',
+          description: savedLocally
+            ? 'Cloud sync failed. Progress is saved on this device only.'
+            : 'Progress could not be saved locally or to the cloud. Keep the game open and try again.',
+          variant: 'destructive',
+        });
+      });
     }
   }, [playerProfile, isInitialSetupDone, toast]);
 
@@ -768,7 +795,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     playerProfile, setPlayerProfile, currentSeason, seasons: SEASONS_DATA, getUpgradeLevel, purchaseUpgrade, getUpgradeCost, upgrades: UPGRADES_DATA,
     arkUpgrades: ARK_UPGRADES_DATA, purchaseArkUpgrade, getArkUpgradeById, addPoints, isLoading, isInitialSetupDone, completeInitialSetup, coreMessages,
     addCoreMessage, isCoreUnlocked, coreLastInteractionTime: 0, connectWallet, handleTap, criticalTapChance, criticalTapMultiplier, comboMultiplier: comboMultiplierValue,
-    comboCount, setComboCount, marketplaceItems: MARKETPLACE_ITEMS_DATA, claimQuestReward, refreshDailyQuestsIfNeeded, refillTaps, battlePassData: BATTLE_PASS_DATA,
+    comboCount, setComboCount, claimFirstMissionReward, marketplaceItems: MARKETPLACE_ITEMS_DATA, claimQuestReward, refreshDailyQuestsIfNeeded, refillTaps, battlePassData: BATTLE_PASS_DATA,
     purchasePremiumPass, claimBattlePassReward, watchRewardedAd, rewardedAdCooldown, isWatchingAd, updatePlayerProfile, toggleCommander, resetGame, toggleMusic, isMusicPlaying,
     isTelegramEnv, connectTelegramWallet, purchaseWithTelegramWallet,
     purchaseMarketplaceItem,
@@ -787,3 +814,4 @@ export const useGame = (): GameContextType => {
   if (context === undefined) throw new Error('useGame must be used within a GameProvider');
   return context;
 };
+
